@@ -10,29 +10,34 @@ logger = logging.getLogger(__name__)
 
 app = flask.Flask(__name__)
 
-DB_FILE = '/tmp/task_events.db' 
+DB_FILE = '/tmp/task_events.db'  
 REQUIRED_FIELDS = ['assignee_id', 'happened_at', 'task_id']
 WEBHOOK_SECRET = 'segredodowebhook'
 
 def initialize_db():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS events (
-            assignee_id TEXT,
-            happened_at TEXT,
-            action TEXT,
-            task_id TEXT,
-            recorded_at TEXT,
-            tab_token TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-    logger.info("Banco de dados inicializado")
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS events (
+                assignee_id TEXT,
+                happened_at TEXT,
+                action TEXT,
+                task_id TEXT,
+                recorded_at TEXT,
+                tab_token TEXT
+            )
+        ''')
+        conn.commit()
+        logger.info("Banco de dados inicializado com sucesso")
+    except sqlite3.Error as e:
+        logger.error(f"Erro ao inicializar banco de dados: {str(e)}")
+        raise
+    finally:
+        if 'conn' in locals():
+            conn.close()
 
-@app.before_first_request
-def before_first_request():
+with app.app_context():
     initialize_db()
 
 @app.route('/webhook', methods=['POST'])
@@ -53,7 +58,7 @@ def webhook():
         'assignee_id': data['assignee_id'],
         'happened_at': data['happened_at'],
         'action': 'play' if 'play' in request.path else 'pause',
-        'task_id': str(data['task_id']), 
+        'task_id': str(data['task_id']),
         'recorded_at': datetime.now().isoformat(),
         'tab_token': data.get('tab_token', '')
     }
@@ -81,11 +86,9 @@ def webhook():
         if 'conn' in locals():
             conn.close()
 
-if __name__ == '__main__':
-    initialize_db()
-    app.run(host='0.0.0.0', port=5000)
+@app.route('/')
+def health_check():
+    return jsonify({"status": "online", "database": "initialized"}), 200
 
-if __name__ != '__main__':
-    gunicorn_logger = logging.getLogger('gunicorn.error')
-    app.logger.handlers = gunicorn_logger.handlers
-    app.logger.setLevel(gunicorn_logger.level)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
