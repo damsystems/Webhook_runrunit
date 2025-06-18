@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 app = flask.Flask(__name__)
 
 DB_FILE = '/tmp/task_events.db'  
-REQUIRED_FIELDS = ['assignee_id', 'happened_at', 'task_id']
+REQUIRED_FIELDS = ['happened_at']
 WEBHOOK_SECRET = 'segredodowebhook'
 
 def initialize_db():
@@ -48,6 +48,7 @@ def webhook():
         return jsonify({"error": "Request must be JSON"}), 400
     
     data = request.json
+
     logger.info(f"Received webhook data: {data}")
 
     missing_fields = [field for field in REQUIRED_FIELDS if field not in data]
@@ -55,13 +56,22 @@ def webhook():
         logger.warning(f"Missing required fields: {missing_fields}")
         return jsonify({"error": f"Missing fields: {', '.join(missing_fields)}"}), 400
     
+    try:
+        task_id = str(data['data']['task']['id'])
+        assignee_id = data['data']['task']['assignees'][0]['id']
+        happened_at = data['happened_at']
+        event_type = data['event']
+    except (KeyError, IndexError) as e:
+         logger.error(f"Estrutura de dados inválida: {str(e)}")
+         return jsonify({"error": "Estrutura de dados inválida"}), 400
+    
     new_record = {
-        'assignee_id': data['assignee_id'],
-        'happened_at': data['happened_at'],
-        'action': 'play' if 'play' in request.path else 'pause',
-        'task_id': str(data['task_id']),
+        'assignee_id': assignee_id,
+        'happened_at': happened_at,
+        'action': 'pause' if 'pause' in event_type else 'play',
+        'task_id': task_id,
         'recorded_at': datetime.now().isoformat(),
-        'tab_token': data.get('tab_token', '')
+        'tab_token': data.get('data', {}).get('task', {}).get('url', '').split('/')[-1]
     }
 
     try:
