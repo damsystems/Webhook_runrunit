@@ -3,7 +3,8 @@ from flask import request, jsonify, send_file
 from datetime import datetime
 import logging
 import sqlite3
-import os
+import pandas as pd
+import io
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -87,12 +88,26 @@ def webhook():
             conn.close()
 
 @app.route('/download-db')
-def download_db():
+def download_file():
     try:
-        return send_file(DB_FILE, as_attachment=True)
+        conn = sqlite3.connect(DB_FILE)
+        df = pd.read_sql('SELECT * FROM events', conn)
+         
+        excel_file = io.BytesIO()
+        df.to_excel(excel_file, index=False, sheet_name='Eventos')
+        excel_file.seek(0)
+
+        conn.close()
+
+        return send_file(
+             excel_file,
+             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+             as_attachment=True,
+             download_name='task_events.xlsx'
+        )
     except Exception as e:
-        logger.error(f"Erro ao enviar arquivo: {str(e)}")
-        return jsonify({"error": "Arquivo não encontrado"}), 404
+         logger.error(f"Erro na exportação para Excel: {str(e)}")
+         return jsonify({"error": str(e)}), 500
 
 @app.route('/')
 def health_check():
