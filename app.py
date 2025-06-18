@@ -1,5 +1,5 @@
 import flask
-from flask import request, jsonify
+from flask import request, jsonify, send_file
 from datetime import datetime
 import logging
 import sqlite3
@@ -85,6 +85,14 @@ def webhook():
     finally:
         if 'conn' in locals():
             conn.close()
+
+@app.route('/download-db')
+def download_db():
+    try:
+        return send_file(DB_FILE, as_attachment=True)
+    except Exception as e:
+        logger.error(f"Erro ao enviar arquivo: {str(e)}")
+        return jsonify({"error": "Arquivo não encontrado"}), 404
 
 @app.route('/')
 def health_check():
