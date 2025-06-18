@@ -1,31 +1,34 @@
 import flask
 from flask import request, jsonify
-import pandas as pd
 from datetime import datetime
-import os
 import logging
+import sqlite3
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = flask.Flask(__name__)
 
-EXCEL_FILE = 'task_events.xlsx'
+DB_FILE = 'task_events.db'
 REQUIRED_FIELDS = ['assignee_id', 'happened_at', 'task_id']
 WEBHOOK_SECRET = 'segredodowebhook'
 
-def initialize_excel_file():
-     if not os.path.exists(EXCEL_FILE):
-          df = pd.DataFrame(columns=[
-            'assignee_id', 
-            'happened_at', 
-            'action', 
-            'task_id', 
-            'recorded_at',
-            'tab_token'
-          ])
-          df.to_excel(EXCEL_FILE, index=False)
-          logger.info("Created new Excel file")
+def initialize_db():
+     conn = sqlite3.connect(DB_FILE)
+     cursor = conn.cursor()
+     cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS events (
+            assignee_id TEXT,
+            happened_at TEXT,
+            action TEXT,
+            task_id TEXT,
+            recorded_at TEXT,
+            tab_token TEXT
+        )
+    ''')
+     conn.commit()
+     conn.close()
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -41,30 +44,44 @@ def webhook():
             logger.warning(f"Missing required fields: {missing_fields}")
             return jsonify({"error": f"Missing fields: {', '.join(missing_fields)}"}), 400
      
-     action = 'play' if 'play' in request.path else 'pause'
      new_record = {
            'assignee_id': data['assignee_id'],
            'happened_at': data['happened_at'],
-           'action': action,
+           'action': 'play' if  'play' in request.path else 'pause',
            'task_id': data['task_id'],
            'recorded_at': datetime.now().isoformat(),
            'tab_token': data.get('tab_token', '')
      }
 
      try:
-         df = pd.read_excel(EXCEL_FILE)
-         df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
-         df.to_excel(EXCEL_FILE, index=False)
-         logger.info(f"Successfully logged event for {data['assignee_id']}")
+         conn = sqlite3.connect(DB_FILE)
+         cursor = conn.cursor()
+         cursor.execute('''
+            INSERT INTO events VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            new_record['assignee_id'],
+            new_record['happened_at'],
+            new_record['action'],
+            new_record['task_id'],
+            new_record['recorded_at'],
+            new_record['tab_token']
+        ))
+         conn.commit()
+         conn.close()
+         logger.info(f"Evento registrado no SQLite: {new_record}")
+         return jsonify({"status": "success"}), 200
      except Exception as e:
-         logger.error(f"Failed to update Excel file: {str(e)}")
-         return jsonify({"error": "Internal server error"}), 500
-     
-     return jsonify({"status": "success"}), 200
+           logger.error(f"Erro no SQLite: {str(e)}")
+           return jsonify({"error": "Falha ao registrar evento"}), 500
+         
 
 if __name__ == '__main__':
-      initialize_excel_file()
       app.run(host='0.0.0.0', port=5000)
+
+if __name__ != '__main__':
+    gunicorn_logger = logging.getLogger('gunicorn.error')
+    app.logger.handlers = gunicorn_logger.handlers
+    app.logger.setLevel(gunicorn_logger.level)
 
 
 
