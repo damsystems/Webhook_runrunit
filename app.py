@@ -137,7 +137,7 @@ def download_filtered_file():
         morning_data = df[morning_mask].copy()
         afternoon_data = df[afternoon_mask].copy()
         
-        def process_period_data(period_df):
+        def process_period_data(period_df, period_name=None):
             if period_df.empty:
                 return pd.DataFrame()
             
@@ -159,8 +159,8 @@ def download_filtered_file():
             
             return result
         
-        morning_processed = process_period_data(morning_data, 'Manhã')
-        afternoon_processed = process_period_data(afternoon_data, 'Tarde')
+        morning_processed = process_period_data(morning_data)
+        afternoon_processed = process_period_data(afternoon_data)
         
         excel_file = io.BytesIO()
         
