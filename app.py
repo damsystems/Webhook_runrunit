@@ -119,6 +119,85 @@ def download_file():
          logger.error(f"Erro na exportação para Excel: {str(e)}")
          return jsonify({"error": str(e)}), 500
 
+@app.route('/download-filtered-db')
+def download_filtered_file():
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        
+        df = pd.read_sql('SELECT * FROM events', conn)
+        
+        df['happened_at'] = pd.to_datetime(df['happened_at']).dt.tz_localize(None)
+        df['date'] = df['happened_at'].dt.date
+        df['time'] = df['happened_at'].dt.time
+        df['hour'] = df['happened_at'].dt.hour
+        
+        morning_mask = (df['hour'] >= 6) & (df['hour'] < 12)
+        afternoon_mask = (df['hour'] >= 13) & (df['hour'] < 22)
+        
+        morning_data = df[morning_mask].copy()
+        afternoon_data = df[afternoon_mask].copy()
+        
+        def process_period_data(period_df):
+            if period_df.empty:
+                return pd.DataFrame()
+            
+            period_df = period_df.sort_values(['assignee_id', 'happened_at'])
+            
+            first_plays = period_df[period_df['action'] == 'play'].groupby('assignee_id').first().reset_index()
+            
+            last_pauses = period_df[period_df['action'] == 'pause'].groupby('assignee_id').last().reset_index()
+            
+            combined = pd.concat([first_plays, last_pauses]).sort_values(['assignee_id', 'happened_at'])
+            
+            combined['date'] = combined['happened_at'].dt.strftime('%Y-%m-%d')
+            combined['time'] = combined['happened_at'].dt.strftime('%H:%M:%S')
+            
+            result = combined[[
+                'assignee_id', 'date', 'time', 'action', 
+                'task_id', 'recorded_at', 'tab_token'
+            ]]
+            
+            return result
+        
+        morning_processed = process_period_data(morning_data, 'Manhã')
+        afternoon_processed = process_period_data(afternoon_data, 'Tarde')
+        
+        excel_file = io.BytesIO()
+        
+        with pd.ExcelWriter(excel_file, engine='xlsxwriter') as writer:
+            if not morning_processed.empty:
+                morning_processed.to_excel(
+                    writer, 
+                    index=False, 
+                    sheet_name='Manhã (6h-12h)'
+                )
+            
+            if not afternoon_processed.empty:
+                afternoon_processed.to_excel(
+                    writer, 
+                    index=False, 
+                    sheet_name='Tarde (13h-22h)'
+                )
+            
+            df.to_excel(
+                writer,
+                index=False,
+                sheet_name='Dados Completos'
+            )
+        
+        excel_file.seek(0)
+        conn.close()
+
+        return send_file(
+            excel_file,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name='filtered_task_events.xlsx'
+        )
+    except Exception as e:
+        logger.error(f"Erro na exportação filtrada para Excel: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/')
 def health_check():
     return jsonify({"status": "online", "database": "initialized"}), 200
