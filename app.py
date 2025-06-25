@@ -184,6 +184,7 @@ def download_filtered_file():
                 index=False,
                 sheet_name='Dados Completos'
             )
+            
         
         excel_file.seek(0)
         conn.close()
