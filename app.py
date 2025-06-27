@@ -101,90 +101,72 @@ def webhook():
 def download_file():
     try:
         conn = sqlite3.connect(DB_FILE)
-        df = pd.read_sql('SELECT * FROM events', conn)
-         
-        excel_file = io.BytesIO()
-        df.to_excel(excel_file, index=False, sheet_name='Eventos')
-        excel_file.seek(0)
-
-        conn.close()
-
-        return send_file(
-             excel_file,
-             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-             as_attachment=True,
-             download_name='task_events.xlsx'
-        )
-    except Exception as e:
-         logger.error(f"Erro na exportação para Excel: {str(e)}")
-         return jsonify({"error": str(e)}), 500
-
-@app.route('/download-filtered-db')
-def download_filtered_file():
-    try:
-        conn = sqlite3.connect(DB_FILE)
         
-        df = pd.read_sql('SELECT * FROM events', conn)
-        
-        df['happened_at'] = pd.to_datetime(df['happened_at']).dt.tz_localize(None)
+        df = pd.read_sql('SELECT * FROM events ORDER BY happened_at', conn)
+    
+        df['happened_at'] = pd.to_datetime(df['happened_at'])
         df['date'] = df['happened_at'].dt.date
-        df['time'] = df['happened_at'].dt.time
-        df['hour'] = df['happened_at'].dt.hour
-        
-        morning_mask = (df['hour'] >= 6) & (df['hour'] < 12)
-        afternoon_mask = (df['hour'] >= 13) & (df['hour'] < 22)
-        
-        morning_data = df[morning_mask].copy()
-        afternoon_data = df[afternoon_mask].copy()
-        
-        def process_period_data(period_df, period_name=None):
-            if period_df.empty:
-                return pd.DataFrame()
-            
-            period_df = period_df.sort_values(['assignee_id', 'happened_at'])
-            
-            first_plays = period_df[period_df['action'] == 'play'].groupby('assignee_id').first().reset_index()
-            
-            last_pauses = period_df[period_df['action'] == 'pause'].groupby('assignee_id').last().reset_index()
-            
-            combined = pd.concat([first_plays, last_pauses]).sort_values(['assignee_id', 'happened_at'])
-            
-            combined['date'] = combined['happened_at'].dt.strftime('%Y-%m-%d')
-            combined['time'] = combined['happened_at'].dt.strftime('%H:%M:%S')
-            
-            result = combined[[
-                'assignee_id', 'date', 'time', 'action', 
-                'task_id', 'recorded_at', 'tab_token'
-            ]]
-            
-            return result
-        
-        morning_processed = process_period_data(morning_data)
-        afternoon_processed = process_period_data(afternoon_data)
         
         excel_file = io.BytesIO()
-        
-        with pd.ExcelWriter(excel_file, engine='xlsxwriter') as writer:
-            if not morning_processed.empty:
-                morning_processed.to_excel(
-                    writer, 
-                    index=False, 
-                    sheet_name='Manhã (6h-12h)'
-                )
+        with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
+            df_export = df.copy()
             
-            if not afternoon_processed.empty:
-                afternoon_processed.to_excel(
-                    writer, 
-                    index=False, 
-                    sheet_name='Tarde (13h-22h)'
-                )
+            df_export = df_export.drop(['recorded_at', 'task_id', 'tab_token'], axis=1)
             
-            df.to_excel(
-                writer,
-                index=False,
-                sheet_name='Dados Completos'
-            )
+            df_export = df_export.rename(columns={
+                'date': 'Data',
+                'assignee_id': 'Nome',
+                'happened_at': 'Hora do Evento',
+                'action': 'Ação'
+            })
             
+            df_export.to_excel(writer, index=False, sheet_name='Eventos')
+            
+            turnos_df = pd.DataFrame(columns=['Nome', 'Data', 'Turno 1', 'Turno 2', 'Turno 3'])
+            
+            grouped = df.groupby(['assignee_id', 'date'])
+            
+            for (user_id, date), group in grouped:
+                group = group.sort_values('happened_at')
+                
+                plays = group[group['action'] == 'play']
+                pauses = group[group['action'] == 'pause']
+                
+                turno1 = []
+                turno2 = []
+                turno3 = []
+                
+                mask = (group['happened_at'].dt.hour >= 6) & (group['happened_at'].dt.hour < 12)
+                turno_group = group[mask]
+                if not turno_group.empty:
+                    first_play = turno_group[turno_group['action'] == 'play'].iloc[0]['happened_at']
+                    last_pause = turno_group[turno_group['action'] == 'pause'].iloc[-1]['happened_at']
+                    turno1 = f"{first_play.strftime('%H:%M')} - {last_pause.strftime('%H:%M')}"
+                
+                mask = (group['happened_at'].dt.hour >= 13) & (group['happened_at'].dt.hour < 22)
+                turno_group = group[mask]
+                if not turno_group.empty:
+                    first_play = turno_group[turno_group['action'] == 'play'].iloc[0]['happened_at']
+                    last_pause = turno_group[turno_group['action'] == 'pause'].iloc[-1]['happened_at']
+                    turno2 = f"{first_play.strftime('%H:%M')} - {last_pause.strftime('%H:%M')}"
+                
+                mask = ~((group['happened_at'].dt.hour >= 6) & (group['happened_at'].dt.hour < 12)) & \
+                       ~((group['happened_at'].dt.hour >= 13) & (group['happened_at'].dt.hour < 22))
+                turno_group = group[mask]
+                if not turno_group.empty:
+                    first_play = turno_group[turno_group['action'] == 'play'].iloc[0]['happened_at']
+                    last_pause = turno_group[turno_group['action'] == 'pause'].iloc[-1]['happened_at']
+                    turno3 = f"{first_play.strftime('%H:%M')} - {last_pause.strftime('%H:%M')}"
+                
+                turnos_df = turnos_df.append({
+                    'Nome': user_id,
+                    'Data': date.strftime('%Y-%m-%d'),
+                    'Turno 1': turno1,
+                    'Turno 2': turno2,
+                    'Turno 3': turno3
+                }, ignore_index=True)
+            
+            turnos_df.to_excel(writer, index=False, sheet_name='Turnos')
         
         excel_file.seek(0)
         conn.close()
@@ -193,10 +175,10 @@ def download_filtered_file():
             excel_file,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             as_attachment=True,
-            download_name='filtered_task_events.xlsx'
+            download_name='task_events.xlsx'
         )
     except Exception as e:
-        logger.error(f"Erro na exportação filtrada para Excel: {str(e)}")
+        logger.error(f"Erro na exportação para Excel: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/')
