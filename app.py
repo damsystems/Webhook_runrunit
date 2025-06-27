@@ -109,7 +109,6 @@ def download_file():
         
         excel_file = io.BytesIO()
         with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
- 
             df_export = df.copy()
             
             df_export = df_export.drop(['recorded_at', 'task_id', 'tab_token'], axis=1)
@@ -120,10 +119,10 @@ def download_file():
                 'happened_at': 'Hora do Evento',
                 'action': 'Ação'
             })
-            
+        
             df_export.to_excel(writer, index=False, sheet_name='Eventos')
-            
-            turnos_df = pd.DataFrame(columns=['Nome', 'Data', 'Turno 1', 'Turno 2', 'Turno 3'])
+        
+            turnos_data = []
             
             grouped = df.groupby(['assignee_id', 'date'])
             
@@ -163,14 +162,16 @@ def download_file():
                         first_play = plays.iloc[0]['happened_at']
                         last_pause = pauses.iloc[-1]['happened_at']
                         turno3 = f"{first_play.strftime('%H:%M')} - {last_pause.strftime('%H:%M')}"
-                
-                turnos_df = turnos_df.append({
+            
+                turnos_data.append({
                     'Nome': user_id,
                     'Data': date.strftime('%Y-%m-%d'),
                     'Turno 1': turno1,
                     'Turno 2': turno2,
                     'Turno 3': turno3
-                }, ignore_index=True)
+                })
+            
+            turnos_df = pd.DataFrame(turnos_data)
             
             turnos_df.to_excel(writer, index=False, sheet_name='Turnos')
         
