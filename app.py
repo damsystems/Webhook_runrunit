@@ -101,9 +101,9 @@ def webhook():
 def download_file():
     try:
         conn = sqlite3.connect(DB_FILE)
-        
+    
         df = pd.read_sql('SELECT * FROM events ORDER BY happened_at', conn)
-        
+
         df['happened_at'] = pd.to_datetime(df['happened_at']).dt.tz_localize(None)
         df['date'] = df['happened_at'].dt.date
         
@@ -119,50 +119,73 @@ def download_file():
                 'happened_at': 'Hora do Evento',
                 'action': 'Ação'
             })
-        
+            
             df_export.to_excel(writer, index=False, sheet_name='Eventos')
-        
+            
             turnos_data = []
             
             grouped = df.groupby(['assignee_id', 'date'])
             
             for (user_id, date), group in grouped:
-
                 group = group.sort_values('happened_at')
                 
                 turno1, turno2, turno3 = "", "", ""
                 
+                # Processa Turno 1
                 mask = (group['happened_at'].dt.hour >= 6) & (group['happened_at'].dt.hour < 12)
                 turno_group = group[mask]
                 if not turno_group.empty:
                     plays = turno_group[turno_group['action'] == 'play']
                     pauses = turno_group[turno_group['action'] == 'pause']
-                    if not plays.empty and not pauses.empty:
-                        first_play = plays.iloc[0]['happened_at']
-                        last_pause = pauses.iloc[-1]['happened_at']
-                        turno1 = f"{first_play.strftime('%H:%M')} - {last_pause.strftime('%H:%M')}"
+                    
+                    if not plays.empty:
+                        first_play = plays.iloc[0]['happened_at'].strftime('%H:%M')
+                        if not pauses.empty:
+                            last_pause = pauses.iloc[-1]['happened_at'].strftime('%H:%M')
+                            turno1 = f"{first_play} - {last_pause}"
+                        else:
+                            turno1 = f"{first_play} - "
+                    elif not pauses.empty:
+                        last_pause = pauses.iloc[-1]['happened_at'].strftime('%H:%M')
+                        turno1 = f" - {last_pause}"
                 
+                # Processa Turno 2
                 mask = (group['happened_at'].dt.hour >= 13) & (group['happened_at'].dt.hour < 22)
                 turno_group = group[mask]
                 if not turno_group.empty:
                     plays = turno_group[turno_group['action'] == 'play']
                     pauses = turno_group[turno_group['action'] == 'pause']
-                    if not plays.empty and not pauses.empty:
-                        first_play = plays.iloc[0]['happened_at']
-                        last_pause = pauses.iloc[-1]['happened_at']
-                        turno2 = f"{first_play.strftime('%H:%M')} - {last_pause.strftime('%H:%M')}"
+                    
+                    if not plays.empty:
+                        first_play = plays.iloc[0]['happened_at'].strftime('%H:%M')
+                        if not pauses.empty:
+                            last_pause = pauses.iloc[-1]['happened_at'].strftime('%H:%M')
+                            turno2 = f"{first_play} - {last_pause}"
+                        else:
+                            turno2 = f"{first_play} - "
+                    elif not pauses.empty:
+                        last_pause = pauses.iloc[-1]['happened_at'].strftime('%H:%M')
+                        turno2 = f" - {last_pause}"
                 
+                # Processa Turno 3
                 mask = ~((group['happened_at'].dt.hour >= 6) & (group['happened_at'].dt.hour < 12)) & \
                        ~((group['happened_at'].dt.hour >= 13) & (group['happened_at'].dt.hour < 22))
                 turno_group = group[mask]
                 if not turno_group.empty:
                     plays = turno_group[turno_group['action'] == 'play']
                     pauses = turno_group[turno_group['action'] == 'pause']
-                    if not plays.empty and not pauses.empty:
-                        first_play = plays.iloc[0]['happened_at']
-                        last_pause = pauses.iloc[-1]['happened_at']
-                        turno3 = f"{first_play.strftime('%H:%M')} - {last_pause.strftime('%H:%M')}"
-            
+                    
+                    if not plays.empty:
+                        first_play = plays.iloc[0]['happened_at'].strftime('%H:%M')
+                        if not pauses.empty:
+                            last_pause = pauses.iloc[-1]['happened_at'].strftime('%H:%M')
+                            turno3 = f"{first_play} - {last_pause}"
+                        else:
+                            turno3 = f"{first_play} - "
+                    elif not pauses.empty:
+                        last_pause = pauses.iloc[-1]['happened_at'].strftime('%H:%M')
+                        turno3 = f" - {last_pause}"
+                
                 turnos_data.append({
                     'Nome': user_id,
                     'Data': date.strftime('%Y-%m-%d'),
