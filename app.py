@@ -103,12 +103,13 @@ def download_file():
         conn = sqlite3.connect(DB_FILE)
         
         df = pd.read_sql('SELECT * FROM events ORDER BY happened_at', conn)
-    
-        df['happened_at'] = pd.to_datetime(df['happened_at'])
+        
+        df['happened_at'] = pd.to_datetime(df['happened_at']).dt.tz_localize(None)
         df['date'] = df['happened_at'].dt.date
         
         excel_file = io.BytesIO()
         with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
+ 
             df_export = df.copy()
             
             df_export = df_export.drop(['recorded_at', 'task_id', 'tab_token'], axis=1)
@@ -127,36 +128,41 @@ def download_file():
             grouped = df.groupby(['assignee_id', 'date'])
             
             for (user_id, date), group in grouped:
+
                 group = group.sort_values('happened_at')
                 
-                plays = group[group['action'] == 'play']
-                pauses = group[group['action'] == 'pause']
-                
-                turno1 = []
-                turno2 = []
-                turno3 = []
+                turno1, turno2, turno3 = "", "", ""
                 
                 mask = (group['happened_at'].dt.hour >= 6) & (group['happened_at'].dt.hour < 12)
                 turno_group = group[mask]
                 if not turno_group.empty:
-                    first_play = turno_group[turno_group['action'] == 'play'].iloc[0]['happened_at']
-                    last_pause = turno_group[turno_group['action'] == 'pause'].iloc[-1]['happened_at']
-                    turno1 = f"{first_play.strftime('%H:%M')} - {last_pause.strftime('%H:%M')}"
+                    plays = turno_group[turno_group['action'] == 'play']
+                    pauses = turno_group[turno_group['action'] == 'pause']
+                    if not plays.empty and not pauses.empty:
+                        first_play = plays.iloc[0]['happened_at']
+                        last_pause = pauses.iloc[-1]['happened_at']
+                        turno1 = f"{first_play.strftime('%H:%M')} - {last_pause.strftime('%H:%M')}"
                 
                 mask = (group['happened_at'].dt.hour >= 13) & (group['happened_at'].dt.hour < 22)
                 turno_group = group[mask]
                 if not turno_group.empty:
-                    first_play = turno_group[turno_group['action'] == 'play'].iloc[0]['happened_at']
-                    last_pause = turno_group[turno_group['action'] == 'pause'].iloc[-1]['happened_at']
-                    turno2 = f"{first_play.strftime('%H:%M')} - {last_pause.strftime('%H:%M')}"
+                    plays = turno_group[turno_group['action'] == 'play']
+                    pauses = turno_group[turno_group['action'] == 'pause']
+                    if not plays.empty and not pauses.empty:
+                        first_play = plays.iloc[0]['happened_at']
+                        last_pause = pauses.iloc[-1]['happened_at']
+                        turno2 = f"{first_play.strftime('%H:%M')} - {last_pause.strftime('%H:%M')}"
                 
                 mask = ~((group['happened_at'].dt.hour >= 6) & (group['happened_at'].dt.hour < 12)) & \
                        ~((group['happened_at'].dt.hour >= 13) & (group['happened_at'].dt.hour < 22))
                 turno_group = group[mask]
                 if not turno_group.empty:
-                    first_play = turno_group[turno_group['action'] == 'play'].iloc[0]['happened_at']
-                    last_pause = turno_group[turno_group['action'] == 'pause'].iloc[-1]['happened_at']
-                    turno3 = f"{first_play.strftime('%H:%M')} - {last_pause.strftime('%H:%M')}"
+                    plays = turno_group[turno_group['action'] == 'play']
+                    pauses = turno_group[turno_group['action'] == 'pause']
+                    if not plays.empty and not pauses.empty:
+                        first_play = plays.iloc[0]['happened_at']
+                        last_pause = pauses.iloc[-1]['happened_at']
+                        turno3 = f"{first_play.strftime('%H:%M')} - {last_pause.strftime('%H:%M')}"
                 
                 turnos_df = turnos_df.append({
                     'Nome': user_id,
