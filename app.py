@@ -127,31 +127,62 @@ def webhook():
 def download_file():
     try:
         conn = psycopg2.connect(DATABASE_URL)
-        df = pd.read_sql('''
+        
+        df_events = pd.read_sql('''
             SELECT 
                 assignee_id as "Nome",
                 happened_at as "Hora do Evento",
                 action as "Ação",
-                task_id,
-                recorded_at,
-                tab_token
+                task_id as "ID Tarefa"
             FROM events 
             ORDER BY happened_at
         ''', conn)
-        
+
+        df_raw = pd.read_sql('''
+            SELECT 
+                assignee_id,
+                happened_at,
+                action,
+                DATE(happened_at) as date
+            FROM events
+            ORDER BY assignee_id, happened_at
+        ''', conn)
+
         turnos_data = []
-        df['happened_at'] = pd.to_datetime(df['Hora do Evento'])
-        df['date'] = df['happened_at'].dt.date
         
-        grouped = df.groupby(['Nome', 'date'])
-        
-        for (user_id, date), group in grouped:
-            group = group.sort_values('happened_at')
+        for (user_id, date), group in df_raw.groupby(['assignee_id', 'date']):
+    
+            group['happened_at'] = pd.to_datetime(group['happened_at'])
             
+            # Inicializa os turnos
             turno1_entrada, turno1_saida = "", ""
             turno2_entrada, turno2_saida = "", ""
             turno3_entrada, turno3_saida = "", ""
-            
+
+            for _, row in group.iterrows():
+                hora = row['happened_at'].hour
+                
+                # Turno 1 (06:00 - 12:00)
+                if 6 <= hora < 12:
+                    if row['action'] == 'play' and not turno1_entrada:
+                        turno1_entrada = row['happened_at'].strftime('%H:%M')
+                    elif row['action'] == 'pause':
+                        turno1_saida = row['happened_at'].strftime('%H:%M')
+                
+                # Turno 2 (13:00 - 22:00)
+                elif 13 <= hora < 22:
+                    if row['action'] == 'play' and not turno2_entrada:
+                        turno2_entrada = row['happened_at'].strftime('%H:%M')
+                    elif row['action'] == 'pause':
+                        turno2_saida = row['happened_at'].strftime('%H:%M')
+                
+                # Turno 3 (demais horários)
+                else:
+                    if row['action'] == 'play' and not turno3_entrada:
+                        turno3_entrada = row['happened_at'].strftime('%H:%M')
+                    elif row['action'] == 'pause':
+                        turno3_saida = row['happened_at'].strftime('%H:%M')
+
             turnos_data.append({
                 'Nome': user_id,
                 'Data': date.strftime('%Y-%m-%d'),
@@ -162,25 +193,24 @@ def download_file():
                 'Turno 3 Entrada': turno3_entrada,
                 'Turno 3 Saída': turno3_saida
             })
-        
-        # Cria o Excel
+
+        df_turnos = pd.DataFrame(turnos_data)
+
         excel_file = io.BytesIO()
         with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
-       
-            df.to_excel(writer, index=False, sheet_name='Eventos')
-            
-            turnos_df = pd.DataFrame(turnos_data)
-            turnos_df.to_excel(writer, index=False, sheet_name='Turnos')
+            df_events.to_excel(writer, sheet_name='Eventos', index=False)
+            df_turnos.to_excel(writer, sheet_name='Turnos', index=False)
         
         excel_file.seek(0)
         return send_file(
             excel_file,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             as_attachment=True,
-            download_name='task_events.xlsx'
+            download_name='registro_turnos.xlsx'
         )
+
     except Exception as e:
-        logger.error(f"Erro na exportação para Excel: {str(e)}")
+        logger.error(f"Erro ao gerar Excel: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
     finally:
         if 'conn' in locals():
