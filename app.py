@@ -49,8 +49,6 @@ def webhook():
     
     data = request.json
 
-    logger.info(f"Received webhook data: {data}")
-
     missing_fields = [field for field in REQUIRED_FIELDS if field not in data]
     if missing_fields:
         logger.warning(f"Missing required fields: {missing_fields}")
@@ -58,7 +56,7 @@ def webhook():
     
     try:
         task_id = str(data['data']['task']['id'])
-        assignee_id = data['data']['task']['assignees'][0]['id']
+        assignee_id = data['performer']['id'] 
         happened_at = data['happened_at']
         event_type = data['event']
     except (KeyError, IndexError) as e:
@@ -74,6 +72,8 @@ def webhook():
         'tab_token': data.get('data', {}).get('task', {}).get('url', '').split('/')[-1]
     }
 
+    logger.info(f"Evento registrado no SQLite: {new_record}")  # Log do registro correto
+
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
@@ -88,7 +88,6 @@ def webhook():
             new_record['tab_token']
         ))
         conn.commit()
-        logger.info(f"Evento registrado no SQLite: {new_record}")
         return jsonify({"status": "success"}), 200
     except sqlite3.Error as e:
         logger.error(f"Erro no SQLite: {str(e)}")
