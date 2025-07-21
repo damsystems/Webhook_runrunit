@@ -53,7 +53,6 @@ def webhook():
         return jsonify({"error": "Request must be JSON"}), 400
     
     data = request.json
-    logger.info(f"Payload recebido (raw): {json.dumps(data, indent=2)}")
 
     REQUIRED_FIELDS = ['happened_at', 'event', 'performer']
     missing_fields = [field for field in REQUIRED_FIELDS if field not in data]
@@ -108,7 +107,6 @@ def webhook():
         ))
         conn.commit()
         
-        logger.info(f"Evento registrado com sucesso no PostgreSQL (ID: {cursor.lastrowid})")
         return jsonify({"status": "success", "record": new_record}), 200
 
     except KeyError as e:
