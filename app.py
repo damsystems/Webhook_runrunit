@@ -51,8 +51,7 @@ def webhook():
         return jsonify({"error": "Request must be JSON"}), 400
     
     data = request.json
-    logger.info(f"Received webhook data: {data}")
-
+   
     missing_fields = [field for field in REQUIRED_FIELDS if field not in data]
     if missing_fields:
         logger.warning(f"Missing required fields: {missing_fields}")
