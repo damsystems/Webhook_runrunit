@@ -46,36 +46,51 @@ with app.app_context():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
+  
     if not request.is_json:
-        logger.warning("Received non-JSON request")
+        logger.warning("Requisição não é JSON")
         return jsonify({"error": "Request must be JSON"}), 400
     
     data = request.json
-   
+    logger.info(f"Payload recebido (raw): {json.dumps(data, indent=2)}")
+
+    REQUIRED_FIELDS = ['happened_at', 'event', 'performer']
     missing_fields = [field for field in REQUIRED_FIELDS if field not in data]
     if missing_fields:
-        logger.warning(f"Missing required fields: {missing_fields}")
+        logger.error(f"Campos obrigatórios faltando: {missing_fields}")
         return jsonify({"error": f"Missing fields: {', '.join(missing_fields)}"}), 400
-    
-    try:
-        task_id = str(data['data']['task']['id'])
-        assignee_id = data['performer']['id'] 
-        happened_at = data['happened_at']
-        event_type = data['event']
-    except (KeyError, IndexError) as e:
-         logger.error(f"Estrutura de dados inválida: {str(e)}")
-         return jsonify({"error": "Estrutura de dados inválida"}), 400
-    
-    new_record = {
-        'assignee_id': assignee_id,
-        'happened_at': happened_at,
-        'action': 'pause' if 'pause' in event_type else 'play',
-        'task_id': task_id,
-        'recorded_at': datetime.now().isoformat(),
-        'tab_token': data.get('data', {}).get('task', {}).get('url', '').split('/')[-1]
-    }
 
     try:
+        task_id = str(data['data']['task']['id'])
+        assignee_id = data['performer']['id']
+        happened_at = data['happened_at']
+        event_type = data['event']
+
+        action = None
+        play_events = ['task_assignment:play', 'task_assignment:start', 'task_play']
+        pause_events = ['task_assignment:pause', 'task_assignment:stop', 'task_pause']
+
+        if any(e in event_type for e in play_events):
+            action = 'play'
+            logger.debug(f"Evento PLAY detectado: {event_type}")
+        elif any(e in event_type for e in pause_events):
+            action = 'pause'
+            logger.debug(f"Evento PAUSE detectado: {event_type}")
+        else:
+            logger.warning(f"Tipo de evento não reconhecido: {event_type}")
+            return jsonify({"error": "Unsupported event type"}), 400
+
+        new_record = {
+            'assignee_id': assignee_id,
+            'happened_at': happened_at,
+            'action': action,
+            'task_id': task_id,
+            'recorded_at': datetime.now().isoformat(),
+            'tab_token': data.get('data', {}).get('task', {}).get('url', '').split('/')[-1]
+        }
+
+        logger.info(f"Registrando novo evento: {new_record}")
+
         conn = psycopg2.connect(DATABASE_URL)
         cursor = conn.cursor()
         cursor.execute('''
@@ -91,11 +106,20 @@ def webhook():
             new_record['tab_token']
         ))
         conn.commit()
-        logger.info(f"Evento registrado no PostgreSQL: {new_record}")
-        return jsonify({"status": "success"}), 200
+        
+        logger.info(f"Evento registrado com sucesso no PostgreSQL (ID: {cursor.lastrowid})")
+        return jsonify({"status": "success", "record": new_record}), 200
+
+    except KeyError as e:
+        logger.error(f"Erro de estrutura no payload: {str(e)}")
+        return jsonify({"error": f"Invalid payload structure: {str(e)}"}), 400
     except psycopg2.Error as e:
         logger.error(f"Erro no PostgreSQL: {str(e)}")
-        return jsonify({"error": f"Erro no banco de dados: {str(e)}"}), 500
+        conn.rollback()
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+    except Exception as e:
+        logger.error(f"Erro inesperado: {str(e)}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
     finally:
         if 'conn' in locals():
             conn.close()
