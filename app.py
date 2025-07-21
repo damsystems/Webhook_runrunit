@@ -128,77 +128,69 @@ def download_file():
     try:
         conn = psycopg2.connect(DATABASE_URL)
         
-        df_events = pd.read_sql('''
-            SELECT 
-                assignee_id as "Nome",
-                happened_at as "Hora do Evento",
-                action as "Ação",
-                task_id as "ID Tarefa"
-            FROM events 
-            ORDER BY happened_at
-        ''', conn)
 
-        df_raw = pd.read_sql('''
+        df = pd.read_sql('''
             SELECT 
                 assignee_id,
                 happened_at,
-                action,
-                DATE(happened_at) as date
+                action
             FROM events
             ORDER BY assignee_id, happened_at
         ''', conn)
-
+        
+       
+        df['happened_at'] = pd.to_datetime(df['happened_at'])
+        df['date'] = df['happened_at'].dt.date
+       
         turnos_data = []
         
-        for (user_id, date), group in df_raw.groupby(['assignee_id', 'date']):
-    
-            group['happened_at'] = pd.to_datetime(group['happened_at'])
-            
-            # Inicializa os turnos
-            turno1_entrada, turno1_saida = "", ""
-            turno2_entrada, turno2_saida = "", ""
-            turno3_entrada, turno3_saida = "", ""
+        for (user_id, date), group in df.groupby(['assignee_id', 'date']):
 
+            turnos = {
+                'Turno 1': {'plays': [], 'pauses': []},
+                'Turno 2': {'plays': [], 'pauses': []},
+                'Turno 3': {'plays': [], 'pauses': []}
+            }
+            
             for _, row in group.iterrows():
                 hora = row['happened_at'].hour
                 
-                # Turno 1 (06:00 - 12:00)
-                if 6 <= hora < 12:
-                    if row['action'] == 'play' and not turno1_entrada:
-                        turno1_entrada = row['happened_at'].strftime('%H:%M')
-                    elif row['action'] == 'pause':
-                        turno1_saida = row['happened_at'].strftime('%H:%M')
+                if 6 <= hora < 12: 
+                    turno = 'Turno 1'
+                elif 13 <= hora < 22:  
+                    turno = 'Turno 2'
+                else:  
+                    turno = 'Turno 3'
                 
-                # Turno 2 (13:00 - 22:00)
-                elif 13 <= hora < 22:
-                    if row['action'] == 'play' and not turno2_entrada:
-                        turno2_entrada = row['happened_at'].strftime('%H:%M')
-                    elif row['action'] == 'pause':
-                        turno2_saida = row['happened_at'].strftime('%H:%M')
-                
-                # Turno 3 (demais horários)
+                if row['action'] == 'play':
+                    turnos[turno]['plays'].append(row['happened_at'])
                 else:
-                    if row['action'] == 'play' and not turno3_entrada:
-                        turno3_entrada = row['happened_at'].strftime('%H:%M')
-                    elif row['action'] == 'pause':
-                        turno3_saida = row['happened_at'].strftime('%H:%M')
-
-            turnos_data.append({
+                    turnos[turno]['pauses'].append(row['happened_at'])
+            
+            registro = {
                 'Nome': user_id,
-                'Data': date.strftime('%Y-%m-%d'),
-                'Turno 1 Entrada': turno1_entrada,
-                'Turno 1 Saída': turno1_saida,
-                'Turno 2 Entrada': turno2_entrada,
-                'Turno 2 Saída': turno2_saida,
-                'Turno 3 Entrada': turno3_entrada,
-                'Turno 3 Saída': turno3_saida
-            })
-
+                'Data': date.strftime('%Y-%m-%d')
+            }
+            
+            for turno, valores in turnos.items():
+                entrada = min(valores['plays']).strftime('%H:%M') if valores['plays'] else ""
+                saida = max(valores['pauses']).strftime('%H:%M') if valores['pauses'] else ""
+                
+                registro[f'{turno} Entrada'] = entrada
+                registro[f'{turno} Saída'] = saida
+            
+            turnos_data.append(registro)
+        
         df_turnos = pd.DataFrame(turnos_data)
-
+        
+        colunas = ['Nome', 'Data']
+        for turno in ['Turno 1', 'Turno 2', 'Turno 3']:
+            colunas.extend([f'{turno} Entrada', f'{turno} Saída'])
+        
+        df_turnos = df_turnos[colunas]
+        
         excel_file = io.BytesIO()
         with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
-            df_events.to_excel(writer, sheet_name='Eventos', index=False)
             df_turnos.to_excel(writer, sheet_name='Turnos', index=False)
         
         excel_file.seek(0)
@@ -210,7 +202,7 @@ def download_file():
         )
 
     except Exception as e:
-        logger.error(f"Erro ao gerar Excel: {str(e)}", exc_info=True)
+        logger.error(f"Erro ao gerar relatório: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
     finally:
         if 'conn' in locals():
