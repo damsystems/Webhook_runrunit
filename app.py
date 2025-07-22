@@ -7,7 +7,6 @@ import io
 import os
 import psycopg2
 import json 
-from psycopg2 import sql
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
